@@ -27,21 +27,27 @@
 #include <string.h>
 #include <curl/curl.h>
 
+#include "nm-utils/c-list.h"
 #include "nm-config.h"
 #include "NetworkManagerUtils.h"
 
 /*****************************************************************************/
 
-typedef struct {
-	GSimpleAsyncResult *simple;
+struct _NMConnectivityCheckHandle {
+	CList handles_lst;
+	NMConnectivity *self;
+	NMConnectivityCheckCallback callback;
+	gpointer user_data;
 	char *response;
-	CURL *curl_ehandle;
-	size_t msg_size;
-	char *msg;
-	struct curl_slist *request_headers;
-	guint timeout_id;
 	char *ifspec;
-} NMConnectivityCheckHandle;
+
+	CURL *curl_ehandle;
+	struct curl_slist *request_headers;
+
+	GString *recv_msg;
+
+	guint timeout_id;
+};
 
 enum {
 	PERIODIC_CHECK,
@@ -52,6 +58,7 @@ enum {
 static guint signals[LAST_SIGNAL] = { 0 };
 
 typedef struct {
+	CList handles_lst_head;
 	char *uri;
 	char *response;
 	gboolean enabled;
@@ -89,60 +96,133 @@ NM_DEFINE_SINGLETON_GETTER (NMConnectivity, nm_connectivity_get, NM_TYPE_CONNECT
         \
         if (nm_logging_enabled (__level, _NMLOG2_DOMAIN)) { \
             _nm_log (__level, _NMLOG2_DOMAIN, 0, \
-                        &cb_data->ifspec[3], NULL, \
-                        "connectivity: (%s) " \
-                        _NM_UTILS_MACRO_FIRST (__VA_ARGS__), \
-                        &cb_data->ifspec[3] \
-                        _NM_UTILS_MACRO_REST (__VA_ARGS__)); \
+                     &cb_data->ifspec[3], NULL, \
+                     "connectivity: (%s) " \
+                     _NM_UTILS_MACRO_FIRST (__VA_ARGS__), \
+                     &cb_data->ifspec[3] \
+                     _NM_UTILS_MACRO_REST (__VA_ARGS__)); \
         } \
     } G_STMT_END
 
 /*****************************************************************************/
 
-NM_UTILS_LOOKUP_STR_DEFINE (nm_connectivity_state_to_string, NMConnectivityState,
+NM_UTILS_LOOKUP_STR_DEFINE_STATIC (_state_to_string, int /*NMConnectivityState*/,
 	NM_UTILS_LOOKUP_DEFAULT_WARN ("???"),
 	NM_UTILS_LOOKUP_STR_ITEM (NM_CONNECTIVITY_UNKNOWN,  "UNKNOWN"),
 	NM_UTILS_LOOKUP_STR_ITEM (NM_CONNECTIVITY_NONE,     "NONE"),
 	NM_UTILS_LOOKUP_STR_ITEM (NM_CONNECTIVITY_LIMITED,  "LIMITED"),
 	NM_UTILS_LOOKUP_STR_ITEM (NM_CONNECTIVITY_PORTAL,   "PORTAL"),
 	NM_UTILS_LOOKUP_STR_ITEM (NM_CONNECTIVITY_FULL,     "FULL"),
+
+	NM_UTILS_LOOKUP_STR_ITEM (NM_CONNECTIVITY_ERROR,    "ERROR"),
+	NM_UTILS_LOOKUP_STR_ITEM (NM_CONNECTIVITY_FAKE,     "FAKE"),
 );
+
+const char *
+nm_connectivity_state_to_string (NMConnectivityState state)
+{
+	return _state_to_string (state);
+}
+
+/*****************************************************************************/
+
+static const char *
+_check_handle_get_response (NMConnectivityCheckHandle *cb_data)
+{
+	return cb_data->response ?: NM_CONFIG_DEFAULT_CONNECTIVITY_RESPONSE;
+}
+
+static void
+cb_data_invoke_callback (NMConnectivityCheckHandle *cb_data,
+                         NMConnectivityState state,
+                         GError *error)
+{
+	NMConnectivityCheckCallback callback;
+
+	nm_assert (cb_data);
+	nm_assert (NM_IS_CONNECTIVITY (cb_data->self));
+
+	callback = cb_data->callback;
+	if (!callback)
+		return;
+
+	cb_data->callback = NULL;
+	_LOG2T ("check completed: %s%s%s%s",
+	        nm_connectivity_state_to_string (state),
+	        NM_PRINT_FMT_QUOTED (error, " (", error->message, ")", ""));
+	callback (cb_data->self,
+	          cb_data,
+	          state,
+	          error,
+	          cb_data->user_data);
+}
+
+static void
+cb_data_free (NMConnectivityCheckHandle *cb_data,
+              NMConnectivityState state,
+              GError *error)
+{
+	NMConnectivity *self;
+	NMConnectivityPrivate *priv;
+
+	nm_assert (cb_data);
+
+	self = cb_data->self;
+
+	nm_assert (NM_IS_CONNECTIVITY (self));
+
+	c_list_unlink (&cb_data->handles_lst);
+
+	if (cb_data->curl_ehandle) {
+
+		/* Contrary to what cURL manual claim it is *not* safe to remove
+		 * the easy handle "at any moment"; specifically not from the
+		 * write function. Thus here we just dissociate the cb_data from
+		 * the easy handle and the easy handle will be cleaned up when the
+		 * message goes to CURLMSG_DONE in curl_check_connectivity(). */
+		curl_easy_setopt (cb_data->curl_ehandle, CURLOPT_WRITEFUNCTION, NULL);
+		curl_easy_setopt (cb_data->curl_ehandle, CURLOPT_WRITEDATA, NULL);
+		curl_easy_setopt (cb_data->curl_ehandle, CURLOPT_HEADERFUNCTION, NULL);
+		curl_easy_setopt (cb_data->curl_ehandle, CURLOPT_HEADERDATA, NULL);
+		curl_easy_setopt (cb_data->curl_ehandle, CURLOPT_PRIVATE, NULL);
+		curl_easy_setopt (cb_data->curl_ehandle, CURLOPT_HTTPHEADER, NULL);
+
+		priv = NM_CONNECTIVITY_GET_PRIVATE (self);
+
+		curl_multi_remove_handle (priv->curl_mhandle, cb_data->curl_ehandle);
+		curl_easy_cleanup (cb_data->curl_ehandle);
+
+		curl_slist_free_all (cb_data->request_headers);
+	}
+
+	nm_clear_g_source (&cb_data->timeout_id);
+
+	cb_data_invoke_callback (cb_data, state, error);
+
+	g_free (cb_data->response);
+	if (cb_data->recv_msg)
+		g_string_free (cb_data->recv_msg, TRUE);
+	g_free (cb_data->ifspec);
+	g_slice_free (NMConnectivityCheckHandle, cb_data);
+}
 
 /*****************************************************************************/
 
 static void
-finish_cb_data (NMConnectivityCheckHandle *cb_data, NMConnectivityState new_state)
-{
-	/* Contrary to what cURL manual claim it is *not* safe to remove
-	 * the easy handle "at any moment"; specifically not from the
-	 * write function. Thus here we just dissociate the cb_data from
-	 * the easy handle and the easy handle will be cleaned up when the
-	 * message goes to CURLMSG_DONE in curl_check_connectivity(). */
-	curl_easy_setopt (cb_data->curl_ehandle, CURLOPT_PRIVATE, NULL);
-
-	g_simple_async_result_set_op_res_gssize (cb_data->simple, new_state);
-	g_simple_async_result_complete (cb_data->simple);
-	g_object_unref (cb_data->simple);
-	curl_slist_free_all (cb_data->request_headers);
-	g_free (cb_data->response);
-	g_free (cb_data->msg);
-	g_free (cb_data->ifspec);
-	g_source_remove (cb_data->timeout_id);
-	g_slice_free (NMConnectivityCheckHandle, cb_data);
-}
-
-static void
-curl_check_connectivity (CURLM *mhandle, CURLMcode ret)
+curl_check_connectivity (CURLM *mhandle, int sockfd, int ev_bitmask)
 {
 	NMConnectivityCheckHandle *cb_data;
 	CURLMsg *msg;
 	CURLcode eret;
-	CURL *easy_handle;
 	gint m_left;
 	long response_code;
+	NMConnectivityState c;
+	CURLMcode ret;
+	int running_handles;
 
+	ret = curl_multi_socket_action (mhandle, sockfd, ev_bitmask, &running_handles);
 	if (ret != CURLM_OK)
-		_LOGW ("connectivity check failed");
+		_LOGE ("connectivity check failed: %d", ret);
 
 	while ((msg = curl_multi_info_read (mhandle, &m_left))) {
 		if (msg->msg != CURLMSG_DONE)
@@ -151,60 +231,45 @@ curl_check_connectivity (CURLM *mhandle, CURLMcode ret)
 		/* Here we have completed a session. Check easy session result. */
 		eret = curl_easy_getinfo (msg->easy_handle, CURLINFO_PRIVATE, (char **) &cb_data);
 		if (eret != CURLE_OK) {
-			_LOG2E ("curl cannot extract cb_data for easy handle %p, skipping msg", msg->easy_handle);
+			_LOGE ("curl cannot extract cb_data for easy handle, skipping msg");
 			continue;
 		}
 
-		if (cb_data) {
-			NMConnectivityState c;
-
-			/* If cb_data is still there this message hasn't been
-			 * taken care of. Do so now. */
-			if (msg->data.result != CURLE_OK) {
-				_LOG2D ("check failed (%d)", msg->data.result);
-				c = NM_CONNECTIVITY_LIMITED;
-			} else if (   !cb_data->response[0]
-			           && (curl_easy_getinfo (msg->easy_handle, CURLINFO_RESPONSE_CODE, &response_code) == CURLE_OK)
-			           && response_code == 204) {
-				/* If we got a 204 response code (no content) and we actually
-				 * requested no content, report full connectivity. */
-				_LOG2D ("response with no content received, check successful");
-				c = NM_CONNECTIVITY_FULL;
-			} else {
-				/* If we get here, it means that easy_write_cb() didn't read enough
-				 * bytes to be able to do a match, or that we were asking for no content
-				 * (204 response code) and we actually got some. Either way, that is
-				 * an indication of a captive portal */
-				_LOG2I ("response did not match expected response '%s'; assuming captive portal.",
-				        cb_data->response);
-				c = NM_CONNECTIVITY_PORTAL;
-			}
-
-			finish_cb_data (cb_data, c);
+		if (!cb_data->callback) {
+			/* callback was already invoked earlier. */
+			c = NM_CONNECTIVITY_UNKNOWN;
+		} else if (msg->data.result != CURLE_OK) {
+			_LOG2D ("check failed (%d)", msg->data.result);
+			c = NM_CONNECTIVITY_LIMITED;
+		} else if (   !((_check_handle_get_response (cb_data))[0])
+		           && (curl_easy_getinfo (msg->easy_handle, CURLINFO_RESPONSE_CODE, &response_code) == CURLE_OK)
+		           && response_code == 204) {
+			/* If we got a 204 response code (no content) and we actually
+			 * requested no content, report full connectivity. */
+			_LOG2D ("response with no content received, check successful");
+			c = NM_CONNECTIVITY_FULL;
+		} else {
+			/* If we get here, it means that easy_write_cb() didn't read enough
+			 * bytes to be able to do a match, or that we were asking for no content
+			 * (204 response code) and we actually got some. Either way, that is
+			 * an indication of a captive portal */
+			_LOG2D ("response did not match expected response '%s'; assuming captive portal.",
+			        _check_handle_get_response (cb_data));
+			c = NM_CONNECTIVITY_PORTAL;
 		}
 
-		/* Do not use message data after calling curl_multi_remove_handle() */
-		easy_handle = msg->easy_handle;
-		curl_multi_remove_handle (mhandle, easy_handle);
-		curl_easy_cleanup (easy_handle);
+		cb_data_free (cb_data, c, NULL);
 	}
 }
 
 static gboolean
 curl_timeout_cb (gpointer user_data)
 {
-	NMConnectivity *self = NM_CONNECTIVITY (user_data);
+	gs_unref_object NMConnectivity *self = g_object_ref (NM_CONNECTIVITY (user_data));
 	NMConnectivityPrivate *priv = NM_CONNECTIVITY_GET_PRIVATE (self);
-	CURLMcode ret;
-	int pending_conn;
 
 	priv->curl_timer = 0;
-
-	ret = curl_multi_socket_action (priv->curl_mhandle, CURL_SOCKET_TIMEOUT, 0, &pending_conn);
-	_LOGT ("timeout elapsed - multi_socket_action (%d conn remaining)", pending_conn);
-
-	curl_check_connectivity (priv->curl_mhandle, ret);
-
+	curl_check_connectivity (priv->curl_mhandle, CURL_SOCKET_TIMEOUT, 0);
 	return G_SOURCE_REMOVE;
 }
 
@@ -217,18 +282,14 @@ multi_timer_cb (CURLM *multi, long timeout_ms, void *userdata)
 	nm_clear_g_source (&priv->curl_timer);
 	if (timeout_ms != -1)
 		priv->curl_timer = g_timeout_add (timeout_ms, curl_timeout_cb, self);
-
 	return 0;
 }
 
 static gboolean
-curl_socketevent_cb (GIOChannel *ch, GIOCondition condition, gpointer data)
+curl_socketevent_cb (GIOChannel *ch, GIOCondition condition, gpointer user_data)
 {
-	NMConnectivity *self = NM_CONNECTIVITY (data);
+	gs_unref_object NMConnectivity *self = g_object_ref (NM_CONNECTIVITY (user_data));
 	NMConnectivityPrivate *priv = NM_CONNECTIVITY_GET_PRIVATE (self);
-	CURLMcode ret;
-	int pending_conn = 0;
-	gboolean bret = TRUE;
 	int fd = g_io_channel_unix_get_fd (ch);
 	int action = 0;
 
@@ -236,16 +297,11 @@ curl_socketevent_cb (GIOChannel *ch, GIOCondition condition, gpointer data)
 		action |= CURL_CSELECT_IN;
 	if (condition & G_IO_OUT)
 		action |= CURL_CSELECT_OUT;
+	if (condition & G_IO_ERR)
+		action |= CURL_CSELECT_ERR;
 
-	ret = curl_multi_socket_action (priv->curl_mhandle, fd, 0, &pending_conn);
-
-	curl_check_connectivity (priv->curl_mhandle, ret);
-
-	if (pending_conn == 0) {
-		nm_clear_g_source (&priv->curl_timer);
-		bret = FALSE;
-	}
-	return bret;
+	curl_check_connectivity (priv->curl_mhandle, fd, action);
+	return G_SOURCE_CONTINUE;
 }
 
 typedef struct {
@@ -258,11 +314,12 @@ multi_socket_cb (CURL *e_handle, curl_socket_t s, int what, void *userdata, void
 {
 	NMConnectivity *self = NM_CONNECTIVITY (userdata);
 	NMConnectivityPrivate *priv = NM_CONNECTIVITY_GET_PRIVATE (self);
-	CurlSockData *fdp = (CurlSockData *) socketp;
+	CurlSockData *fdp = socketp;
 	GIOCondition condition = 0;
 
 	if (what == CURL_POLL_REMOVE) {
 		if (fdp) {
+			curl_multi_assign (priv->curl_mhandle, s, NULL);
 			nm_clear_g_source (&fdp->ev);
 			g_io_channel_unref (fdp->ch);
 			g_slice_free (CurlSockData, fdp);
@@ -271,6 +328,7 @@ multi_socket_cb (CURL *e_handle, curl_socket_t s, int what, void *userdata, void
 		if (!fdp) {
 			fdp = g_slice_new0 (CurlSockData);
 			fdp->ch = g_io_channel_unix_new (s);
+			curl_multi_assign (priv->curl_mhandle, s, fdp);
 		} else
 			nm_clear_g_source (&fdp->ev);
 
@@ -278,12 +336,11 @@ multi_socket_cb (CURL *e_handle, curl_socket_t s, int what, void *userdata, void
 			condition = G_IO_IN;
 		else if (what == CURL_POLL_OUT)
 			condition = G_IO_OUT;
-		else if (condition == CURL_POLL_INOUT)
+		else if (what == CURL_POLL_INOUT)
 			condition = G_IO_IN | G_IO_OUT;
 
 		if (condition)
 			fdp->ev = g_io_add_watch (fdp->ch, condition, curl_socketevent_cb, self);
-		curl_multi_assign (priv->curl_mhandle, s, fdp);
 	}
 
 	return CURLM_OK;
@@ -300,7 +357,7 @@ easy_header_cb (char *buffer, size_t size, size_t nitems, void *userdata)
 	if (   len >= sizeof (HEADER_STATUS_ONLINE) - 1
 	    && !g_ascii_strncasecmp (buffer, HEADER_STATUS_ONLINE, sizeof (HEADER_STATUS_ONLINE) - 1)) {
 		_LOG2D ("status header found, check successful");
-		finish_cb_data (cb_data, NM_CONNECTIVITY_FULL);
+		cb_data_invoke_callback (cb_data, NM_CONNECTIVITY_FULL, NULL);
 		return 0;
 	}
 
@@ -312,23 +369,28 @@ easy_write_cb (void *buffer, size_t size, size_t nmemb, void *userdata)
 {
 	NMConnectivityCheckHandle *cb_data = userdata;
 	size_t len = size * nmemb;
+	const char *response = _check_handle_get_response (cb_data);;
 
-	cb_data->msg = g_realloc (cb_data->msg, cb_data->msg_size + len);
-	memcpy (cb_data->msg + cb_data->msg_size, buffer, len);
-	cb_data->msg_size += len;
+	if (!cb_data->recv_msg)
+		cb_data->recv_msg = g_string_sized_new (len + 10);
 
-	/* Check matching prefix if a expected response is given */
-	if (   cb_data->response[0]
-	    && cb_data->msg_size >= strlen (cb_data->response)) {
+	g_string_append_len (cb_data->recv_msg, buffer, len);
+
+	if (   response
+	    && cb_data->recv_msg->len >= strlen (response)) {
+		NMConnectivityState c;
+
 		/* We already have enough data -- check response */
-		if (g_str_has_prefix (cb_data->msg, cb_data->response)) {
+		if (g_str_has_prefix (cb_data->recv_msg->str, response)) {
 			_LOG2D ("check successful.");
-			finish_cb_data (cb_data, NM_CONNECTIVITY_FULL);
+			c = NM_CONNECTIVITY_FULL;
 		} else {
 			_LOG2I ("response did not match expected response '%s'; assuming captive portal.",
-			        cb_data->response);
-			finish_cb_data (cb_data, NM_CONNECTIVITY_PORTAL);
+			        response);
+			c = NM_CONNECTIVITY_PORTAL;
 		}
+
+		cb_data_invoke_callback (cb_data, c, NULL);
 		return 0;
 	}
 
@@ -336,89 +398,109 @@ easy_write_cb (void *buffer, size_t size, size_t nmemb, void *userdata)
 }
 
 static gboolean
-timeout_cb (gpointer user_data)
+_timeout_cb (gpointer user_data)
 {
 	NMConnectivityCheckHandle *cb_data = user_data;
-	NMConnectivity *self = NM_CONNECTIVITY (g_async_result_get_source_object (G_ASYNC_RESULT (cb_data->simple)));
-	NMConnectivityPrivate *priv = NM_CONNECTIVITY_GET_PRIVATE (self);
-	CURL *ehandle = cb_data->curl_ehandle;
+	NMConnectivity *self;
 
-	_LOG2I ("timed out");
-	finish_cb_data (cb_data, NM_CONNECTIVITY_LIMITED);
-	curl_multi_remove_handle (priv->curl_mhandle, ehandle);
-	curl_easy_cleanup (ehandle);
+	nm_assert (NM_IS_CONNECTIVITY (cb_data->self));
 
+	self = cb_data->self;
+
+	nm_assert (c_list_contains (&NM_CONNECTIVITY_GET_PRIVATE (self)->handles_lst_head, &cb_data->handles_lst));
+
+	_LOG2D ("timed out");
+	cb_data_free (cb_data, NM_CONNECTIVITY_LIMITED, NULL);
 	return G_SOURCE_REMOVE;
 }
 
-void
-nm_connectivity_check_async (NMConnectivity      *self,
-                             const char          *iface,
-                             GAsyncReadyCallback  callback,
-                             gpointer             user_data)
+static gboolean
+_idle_cb (gpointer user_data)
+{
+	NMConnectivityCheckHandle *cb_data = user_data;
+
+	nm_assert (NM_IS_CONNECTIVITY (cb_data->self));
+	nm_assert (c_list_contains (&NM_CONNECTIVITY_GET_PRIVATE (cb_data->self)->handles_lst_head, &cb_data->handles_lst));
+
+	cb_data->timeout_id = 0;
+	cb_data_free (cb_data, NM_CONNECTIVITY_UNKNOWN, NULL);
+	return G_SOURCE_REMOVE;
+}
+
+NMConnectivityCheckHandle *
+nm_connectivity_check_start (NMConnectivity *self,
+                             const char *iface,
+                             NMConnectivityCheckCallback callback,
+                             gpointer user_data)
 {
 	NMConnectivityPrivate *priv;
-	GSimpleAsyncResult *simple;
 	CURL *ehandle = NULL;
+	NMConnectivityCheckHandle *cb_data;
 
-	g_return_if_fail (NM_IS_CONNECTIVITY (self));
+	g_return_val_if_fail (NM_IS_CONNECTIVITY (self), NULL);
+	g_return_val_if_fail (iface && iface[0], NULL);
+	g_return_val_if_fail (callback, NULL);
+
 	priv = NM_CONNECTIVITY_GET_PRIVATE (self);
 
-	simple = g_simple_async_result_new (G_OBJECT (self), callback, user_data,
-	                                    nm_connectivity_check_async);
+	cb_data = g_slice_new0 (NMConnectivityCheckHandle);
+	cb_data->self = self;
+	c_list_link_tail (&priv->handles_lst_head, &cb_data->handles_lst);
+	cb_data->callback = callback;
+	cb_data->user_data = user_data;
 
 	if (priv->enabled)
 		ehandle = curl_easy_init ();
 
-	if (ehandle) {
-		NMConnectivityCheckHandle *cb_data = g_slice_new0 (NMConnectivityCheckHandle);
-
-		cb_data->curl_ehandle = ehandle;
-		cb_data->request_headers = curl_slist_append (NULL, "Connection: close");
-		cb_data->ifspec = g_strdup_printf ("if!%s", iface);
-		cb_data->simple = simple;
-		if (priv->response)
-			cb_data->response = g_strdup (priv->response);
-		else
-			cb_data->response = g_strdup (NM_CONFIG_DEFAULT_CONNECTIVITY_RESPONSE);
-
-		curl_easy_setopt (ehandle, CURLOPT_URL, priv->uri);
-		curl_easy_setopt (ehandle, CURLOPT_WRITEFUNCTION, easy_write_cb);
-		curl_easy_setopt (ehandle, CURLOPT_WRITEDATA, cb_data);
-		curl_easy_setopt (ehandle, CURLOPT_HEADERFUNCTION, easy_header_cb);
-		curl_easy_setopt (ehandle, CURLOPT_HEADERDATA, cb_data);
-		curl_easy_setopt (ehandle, CURLOPT_PRIVATE, cb_data);
-		curl_easy_setopt (ehandle, CURLOPT_HTTPHEADER, cb_data->request_headers);
-		curl_easy_setopt (ehandle, CURLOPT_INTERFACE, cb_data->ifspec);
-		curl_multi_add_handle (priv->curl_mhandle, ehandle);
-
-		cb_data->timeout_id = g_timeout_add_seconds (30, timeout_cb, cb_data);
-
-		_LOG2D ("sending request to '%s'", priv->uri);
-		return;
-	} else {
+	if (!ehandle) {
 		_LOGD ("(%s) faking request. Connectivity check disabled", iface);
+
+		cb_data->timeout_id = g_idle_add (_idle_cb, cb_data);
+		return cb_data;
 	}
 
-	g_simple_async_result_set_op_res_gssize (simple, NM_CONNECTIVITY_UNKNOWN);
-	g_simple_async_result_complete_in_idle (simple);
-	g_object_unref (simple);
+	cb_data->response = g_strdup (priv->response);
+	cb_data->curl_ehandle = ehandle;
+	cb_data->ifspec = g_strdup_printf ("if!%s", iface);
+	cb_data->request_headers = curl_slist_append (NULL, "Connection: close");
+	curl_easy_setopt (ehandle, CURLOPT_URL, priv->uri);
+	curl_easy_setopt (ehandle, CURLOPT_WRITEFUNCTION, easy_write_cb);
+	curl_easy_setopt (ehandle, CURLOPT_WRITEDATA, cb_data);
+	curl_easy_setopt (ehandle, CURLOPT_HEADERFUNCTION, easy_header_cb);
+	curl_easy_setopt (ehandle, CURLOPT_HEADERDATA, cb_data);
+	curl_easy_setopt (ehandle, CURLOPT_PRIVATE, cb_data);
+	curl_easy_setopt (ehandle, CURLOPT_HTTPHEADER, cb_data->request_headers);
+	curl_easy_setopt (ehandle, CURLOPT_INTERFACE, cb_data->ifspec);
+	curl_multi_add_handle (priv->curl_mhandle, ehandle);
+
+	cb_data->timeout_id = g_timeout_add_seconds (30, _timeout_cb, cb_data);
+
+	_LOG2D ("sending request to '%s'", priv->uri);
+	return cb_data;
 }
 
-NMConnectivityState
-nm_connectivity_check_finish (NMConnectivity  *self,
-                              GAsyncResult    *result,
-                              GError         **error)
+void
+nm_connectivity_check_cancel (NMConnectivityCheckHandle *cb_data)
 {
-	GSimpleAsyncResult *simple;
+	NMConnectivity *self;
+	gs_free_error GError *error = NULL;
 
-	g_return_val_if_fail (g_simple_async_result_is_valid (result, G_OBJECT (self), nm_connectivity_check_async), NM_CONNECTIVITY_UNKNOWN);
+	g_return_if_fail (cb_data);
 
-	simple = G_SIMPLE_ASYNC_RESULT (result);
-	if (g_simple_async_result_propagate_error (simple, error))
-		return NM_CONNECTIVITY_UNKNOWN;
-	return (NMConnectivityState) g_simple_async_result_get_op_res_gssize (simple);
+	self = cb_data->self;
+
+	g_return_if_fail (NM_IS_CONNECTIVITY (self));
+	g_return_if_fail (!c_list_is_empty (&cb_data->handles_lst));
+	g_return_if_fail (cb_data->callback);
+
+	nm_assert (c_list_contains (&NM_CONNECTIVITY_GET_PRIVATE (self)->handles_lst_head, &cb_data->handles_lst));
+
+	nm_utils_error_set_cancelled (&error, FALSE, "NMConnectivity");
+
+	cb_data_free (cb_data, NM_CONNECTIVITY_ERROR, error);
 }
+
+/*****************************************************************************/
 
 gboolean
 nm_connectivity_check_enabled (NMConnectivity *self)
@@ -493,7 +575,7 @@ update_config (NMConnectivity *self, NMConfigData *config_data)
 
 	/* Set the response. */
 	response = nm_config_data_get_connectivity_response (config_data);
-	if (g_strcmp0 (response, priv->response) != 0) {
+	if (!nm_streq0 (response, priv->response)) {
 		/* a response %NULL means, NM_CONFIG_DEFAULT_CONNECTIVITY_RESPONSE. Any other response
 		 * (including "") is accepted. */
 		g_free (priv->response);
@@ -518,11 +600,15 @@ config_changed_cb (NMConfig *config,
 	update_config (self, config_data);
 }
 
+/*****************************************************************************/
+
 static void
 nm_connectivity_init (NMConnectivity *self)
 {
 	NMConnectivityPrivate *priv = NM_CONNECTIVITY_GET_PRIVATE (self);
 	CURLcode retv;
+
+	c_list_init (&priv->handles_lst_head);
 
 	retv = curl_global_init (CURL_GLOBAL_ALL);
 	if (retv == CURLE_OK)
@@ -539,13 +625,12 @@ nm_connectivity_init (NMConnectivity *self)
 	}
 
 	priv->config = g_object_ref (nm_config_get ());
-
-	update_config (self, nm_config_get_data (priv->config));
 	g_signal_connect (G_OBJECT (priv->config),
 	                  NM_CONFIG_SIGNAL_CONFIG_CHANGED,
 	                  G_CALLBACK (config_changed_cb),
 	                  self);
 
+	update_config (self, nm_config_get_data (priv->config));
 }
 
 static void
@@ -553,6 +638,19 @@ dispose (GObject *object)
 {
 	NMConnectivity *self = NM_CONNECTIVITY (object);
 	NMConnectivityPrivate *priv = NM_CONNECTIVITY_GET_PRIVATE (self);
+	NMConnectivityCheckHandle *cb_data;
+	GError *error = NULL;
+
+again:
+	c_list_for_each_entry (cb_data, &priv->handles_lst_head, handles_lst) {
+		if (!error)
+			nm_utils_error_set_cancelled (&error, TRUE, "NMConnectivity");
+		cb_data_free (cb_data, NM_CONNECTIVITY_ERROR, error);
+		goto again;
+	}
+	g_clear_error (&error);
+
+	nm_clear_g_source (&priv->curl_timer);
 
 	g_clear_pointer (&priv->uri, g_free);
 	g_clear_pointer (&priv->response, g_free);

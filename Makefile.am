@@ -1576,6 +1576,7 @@ src_libNetworkManager_la_SOURCES = \
 	src/nm-config.h \
 	src/nm-config-data.c \
 	src/nm-config-data.h \
+	src/nm-connectivity.c \
 	src/nm-connectivity.h \
 	src/nm-dcb.c \
 	src/nm-dcb.h \
@@ -1612,11 +1613,6 @@ src_libNetworkManager_la_SOURCES = \
 	src/nm-types.h \
 	\
 	$(NULL)
-
-if WITH_CONCHECK
-src_libNetworkManager_la_SOURCES += \
-	src/nm-connectivity.c
-endif
 
 src_libNetworkManager_la_LIBADD = \
 	src/libNetworkManagerBase.la \

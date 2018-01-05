@@ -2420,7 +2420,6 @@ device_realized (NMDevice *device,
 	_notify (self, PROP_DEVICES);
 }
 
-#if WITH_CONCHECK
 static void
 device_connectivity_changed (NMDevice *device,
                              GParamSpec *pspec,
@@ -2448,7 +2447,6 @@ device_connectivity_changed (NMDevice *device,
 		nm_dispatcher_call_connectivity (priv->connectivity_state, NULL, NULL, NULL);
 	}
 }
-#endif
 
 static void
 _device_realize_finish (NMManager *self,
@@ -2555,11 +2553,9 @@ add_device (NMManager *self, NMDevice *device, GError **error)
 	                  G_CALLBACK (device_realized),
 	                  self);
 
-#if WITH_CONCHECK
 	g_signal_connect (device, "notify::" NM_DEVICE_CONNECTIVITY,
 	                  G_CALLBACK (device_connectivity_changed),
 	                  self);
-#endif
 
 	if (priv->startup) {
 		g_signal_connect (device, "notify::" NM_DEVICE_HAS_PENDING_ACTION,
@@ -5328,7 +5324,11 @@ typedef struct {
 } ConnectivityCheckData;
 
 static void
-device_connectivity_done (NMDevice *device, NMConnectivityState state, gpointer user_data)
+device_connectivity_done (NMDevice *self,
+                          NMDeviceConnectivityHandle *handle,
+                          NMConnectivityState state,
+                          GError *error,
+                          gpointer user_data)
 {
 	ConnectivityCheckData *data = user_data;
 
@@ -6591,7 +6591,6 @@ get_property (GObject *object, guint prop_id,
 	const char *path;
 	NMActiveConnection *ac;
 	GPtrArray *ptrarr;
-	gboolean vbool;
 
 	switch (prop_id) {
 	case PROP_VERSION:
@@ -6648,12 +6647,8 @@ get_property (GObject *object, guint prop_id,
 		g_value_set_boolean (value, nm_config_data_get_connectivity_uri (config_data) != NULL);
 		break;
 	case PROP_CONNECTIVITY_CHECK_ENABLED:
-#if WITH_CONCHECK
-		vbool = nm_connectivity_check_enabled (nm_connectivity_get ());
-#else
-		vbool = FALSE;
-#endif
-		g_value_set_boolean (value, vbool);
+		g_value_set_boolean (value,
+		                     nm_connectivity_check_enabled (nm_connectivity_get ()));
 		break;
 	case PROP_PRIMARY_CONNECTION:
 		nm_utils_g_value_set_object_path (value, priv->primary_connection);
