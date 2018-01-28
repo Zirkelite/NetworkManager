@@ -1402,6 +1402,8 @@ src_libNetworkManagerBase_la_SOURCES = \
 	src/ndisc/nm-ndisc.h \
 	src/ndisc/nm-ndisc-private.h \
 	\
+	src/nm-dbus-object.c \
+	src/nm-dbus-object.h \
 	src/nm-exported-object.c \
 	src/nm-exported-object.h \
 	src/nm-ip4-config.c \

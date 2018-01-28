@@ -204,7 +204,7 @@ _method_call (GDBusConnection *connection,
 	g_dbus_method_invocation_return_value (invocation, NULL);
 }
 
-NM_DEFINE_GDBUS_INTERFACE_INFO (
+NM_DEFINE_GDBUS_INTERFACE_INFO_VAR (
 	interface_info,
 	NM_DHCP_HELPER_SERVER_INTERFACE_NAME,
 	.methods = NM_DEFINE_GDBUS_METHOD_INFOS (

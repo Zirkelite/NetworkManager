@@ -821,7 +821,7 @@ _method_call (GDBusConnection *connection,
 	g_return_if_reached ();
 }
 
-NM_DEFINE_GDBUS_INTERFACE_INFO (
+NM_DEFINE_GDBUS_INTERFACE_INFO_VAR (
 	interface_info,
 	IFCFGRH1_BUS_NAME,
 	.methods = NM_DEFINE_GDBUS_METHOD_INFOS (

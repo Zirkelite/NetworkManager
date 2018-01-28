@@ -30,6 +30,7 @@
 #include "nm-utils.h"
 #include "nm-core-internal.h"
 #include "platform/nm-platform.h"
+#include "nm-exported-object.h"
 
 #include "nm-setting-wireless.h"
 
@@ -75,15 +76,15 @@ typedef struct {
 } NMWifiAPPrivate;
 
 struct _NMWifiAP {
-	NMExportedObject parent;
+	NMDBusObject parent;
 	NMWifiAPPrivate _priv;
 };
 
 struct _NMWifiAPClass {
-	NMExportedObjectClass parent;
+	NMDBusObjectClass parent;
 };
 
-G_DEFINE_TYPE (NMWifiAP, nm_wifi_ap, NM_TYPE_EXPORTED_OBJECT)
+G_DEFINE_TYPE (NMWifiAP, nm_wifi_ap, NM_TYPE_DBUS_OBJECT)
 
 #define NM_WIFI_AP_GET_PRIVATE(self) _NM_GET_PRIVATE(self, NMWifiAP, NM_IS_WIFI_AP)
 
@@ -105,7 +106,7 @@ nm_wifi_ap_get_id (NMWifiAP *ap)
 
 	g_return_val_if_fail (NM_IS_WIFI_AP (ap), 0);
 
-	path = nm_exported_object_get_path (NM_EXPORTED_OBJECT (ap));
+	path = nm_dbus_object_get_path (NM_DBUS_OBJECT (ap));
 	g_return_val_if_fail (path, 0);
 
 	nm_assert (g_str_has_prefix (path, NM_DBUS_PATH_ACCESS_POINT"/"));
@@ -330,7 +331,7 @@ guint32
 nm_wifi_ap_get_max_bitrate (NMWifiAP *ap)
 {
 	g_return_val_if_fail (NM_IS_WIFI_AP (ap), 0);
-	g_return_val_if_fail (nm_exported_object_is_exported (NM_EXPORTED_OBJECT (ap)), 0);
+	g_return_val_if_fail (nm_dbus_object_is_exported (NM_DBUS_OBJECT (ap)), 0);
 
 	return NM_WIFI_AP_GET_PRIVATE (ap)->max_bitrate;
 }
@@ -978,7 +979,7 @@ nm_wifi_ap_to_string (const NMWifiAP *self,
 	if (priv->supplicant_path)
 		supplicant_id = strrchr (priv->supplicant_path, '/') ?: supplicant_id;
 
-	export_path = nm_exported_object_get_path (NM_EXPORTED_OBJECT (self));
+	export_path = nm_dbus_object_get_path (NM_DBUS_OBJECT (self));
 	if (export_path)
 		export_path = strrchr (export_path, '/') ?: export_path;
 	else
@@ -1343,6 +1344,34 @@ finalize (GObject *object)
 	G_OBJECT_CLASS (nm_wifi_ap_parent_class)->finalize (object);
 }
 
+static const GDBusInterfaceInfo *interface_infos[] = {
+	NM_DEFINE_GDBUS_INTERFACE_INFO (
+		NM_DBUS_SERVICE,
+		.methods = NM_DEFINE_GDBUS_METHOD_INFOS (
+			NM_DEFINE_GDBUS_METHOD_INFO (
+				IFCFGRH1_IFACE1_METHOD_GET_IFCFG_DETAILS,
+				.in_args = NM_DEFINE_GDBUS_ARG_INFOS (
+					NM_DEFINE_GDBUS_ARG_INFO (
+						"ifcfg",
+						.signature = "s",
+					),
+				),
+				.out_args = NM_DEFINE_GDBUS_ARG_INFOS (
+					NM_DEFINE_GDBUS_ARG_INFO (
+						"uuid",
+						.signature = "s",
+					),
+					NM_DEFINE_GDBUS_ARG_INFO (
+						"path",
+						.signature = "o",
+					),
+				),
+			),
+		),
+	),
+	NULL,
+};
+
 static void
 nm_wifi_ap_class_init (NMWifiAPClass *ap_class)
 {
@@ -1360,9 +1389,10 @@ nm_wifi_ap_class_init (NMWifiAPClass *ap_class)
 	| NM_802_11_AP_SEC_KEY_MGMT_802_1X )
 
 	GObjectClass *object_class = G_OBJECT_CLASS (ap_class);
-	NMExportedObjectClass *exported_object_class = NM_EXPORTED_OBJECT_CLASS (ap_class);
+	NMDBusObjectClass *dbus_object_class = NM_DBUS_OBJECT_CLASS (ap_class);
 
-	exported_object_class->export_path = NM_EXPORT_PATH_NUMBERED (NM_DBUS_PATH_ACCESS_POINT);
+	dbus_object_class->export_path = NM_EXPORT_PATH_NUMBERED (NM_DBUS_PATH_ACCESS_POINT);
+	dbus_object_class->interface_infos = 
 
 	object_class->get_property = get_property;
 	object_class->finalize = finalize;
@@ -1425,10 +1455,6 @@ nm_wifi_ap_class_init (NMWifiAPClass *ap_class)
 	                       G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
 	g_object_class_install_properties (object_class, _PROPERTY_ENUMS_LAST, obj_properties);
-
-	nm_exported_object_class_add_interface (NM_EXPORTED_OBJECT_CLASS (ap_class),
-	                                        NMDBUS_TYPE_ACCESS_POINT_SKELETON,
-	                                        NULL);
 }
 
 /*****************************************************************************/
@@ -1487,7 +1513,7 @@ nm_wifi_aps_get_sorted_paths (GHashTable *aps, gboolean include_without_ssid)
 		const char *path;
 
 		/* update @list inplace to hold instead the export-path. */
-		path = nm_exported_object_get_path (NM_EXPORTED_OBJECT (ap));
+		path = nm_dbus_object_get_path (NM_DBUS_OBJECT (ap));
 		nm_assert (path);
 		list[j++] = (gpointer) path;
 	}

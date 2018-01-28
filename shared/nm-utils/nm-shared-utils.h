@@ -495,7 +495,14 @@ int nm_utils_fd_read_loop_exact (int fd, void *buf, size_t nbytes, bool do_poll)
 		NULL, \
 	}))
 
-#define NM_DEFINE_GDBUS_INTERFACE_INFO(variable, i_name, ...) \
+#define NM_DEFINE_GDBUS_INTERFACE_INFO(i_name, ...) \
+	((GDBusInterfaceInfo *) (&((const GDBusInterfaceInfo) { \
+		.ref_count = -1, \
+		.name = i_name, \
+		__VA_ARGS__ \
+	})))
+
+#define NM_DEFINE_GDBUS_INTERFACE_INFO_VAR(variable, i_name, ...) \
 	static GDBusInterfaceInfo *const variable = ((GDBusInterfaceInfo *) (&((const GDBusInterfaceInfo) { \
 		.ref_count = -1, \
 		.name = i_name, \
