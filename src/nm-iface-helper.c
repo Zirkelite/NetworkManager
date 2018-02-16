@@ -124,7 +124,8 @@ dhcp4_state_changed (NMDhcpClient *client,
 		if (last_config)
 			nm_ip4_config_subtract (existing, last_config, 0);
 
-		nm_ip4_config_merge (existing, ip4_config, NM_IP_CONFIG_MERGE_DEFAULT, 0);
+		nm_ip4_config_merge (existing, ip4_config, NM_IP_CONFIG_MERGE_DEFAULT,
+		                     RT_TABLE_MAIN, global_opt.priority_v4, 0);
 		nm_ip4_config_add_dependent_routes (existing,
 		                                    RT_TABLE_MAIN,
 		                                    global_opt.priority_v4,
@@ -228,7 +229,8 @@ ndisc_config_changed (NMNDisc *ndisc, const NMNDiscData *rdata, guint changed_in
 		nm_platform_sysctl_set (NM_PLATFORM_GET, NMP_SYSCTL_PATHID_ABSOLUTE (nm_utils_sysctl_ip_conf_path (AF_INET6, sysctl_path_buf, global_opt.ifname, "mtu")), val);
 	}
 
-	nm_ip6_config_merge (existing, ndisc_config, NM_IP_CONFIG_MERGE_DEFAULT, 0);
+	nm_ip6_config_merge (existing, ndisc_config, NM_IP_CONFIG_MERGE_DEFAULT,
+	                     RT_TABLE_MAIN, global_opt.priority_v6, 0);
 	nm_ip6_config_add_dependent_routes (existing,
 	                                    RT_TABLE_MAIN,
 	                                    global_opt.priority_v6);
@@ -461,8 +463,6 @@ main (int argc, char *argv[])
 		                                          gl.ifindex,
 		                                          hwaddr,
 		                                          global_opt.uuid,
-		                                          RT_TABLE_MAIN,
-		                                          global_opt.priority_v4,
 		                                          !!global_opt.dhcp4_hostname,
 		                                          global_opt.dhcp4_hostname,
 		                                          global_opt.dhcp4_fqdn,

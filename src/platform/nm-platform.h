@@ -400,6 +400,9 @@ typedef union {
 	bool lock_initrwnd:1; \
 	bool lock_mtu:1; \
 	\
+	bool metric_unset:1; \
+	bool table_unset:1; \
+	\
 	/* rtnh_flags
 	 *
 	 * Routes with rtm_flags RTM_F_CLONED are hidden by platform and

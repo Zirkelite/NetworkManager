@@ -39,8 +39,6 @@
 #define DEBUG 1
 
 static const int IFINDEX = 5;
-static const guint32 ROUTE_TABLE = RT_TABLE_MAIN;
-static const guint32 ROUTE_METRIC = 100;
 
 static void
 test_config (const char *orig,
@@ -919,7 +917,7 @@ test_read_lease_ip4_config_basic (void)
 
 	/* Date from before the least expiration */
 	now = g_date_time_new_utc (2013, 11, 1, 19, 55, 32);
-	leases = nm_dhcp_dhclient_read_lease_ip_configs (multi_idx, AF_INET, "wlan0", IFINDEX, ROUTE_TABLE, ROUTE_METRIC, contents, now);
+	leases = nm_dhcp_dhclient_read_lease_ip_configs (multi_idx, AF_INET, "wlan0", IFINDEX, contents, now);
 	g_assert_cmpint (g_slist_length (leases), ==, 2);
 
 	/* IP4Config #1 */
@@ -994,7 +992,7 @@ test_read_lease_ip4_config_expired (void)
 
 	/* Date from *after* the lease expiration */
 	now = g_date_time_new_utc (2013, 12, 1, 19, 55, 32);
-	leases = nm_dhcp_dhclient_read_lease_ip_configs (multi_idx, AF_INET, "wlan0", IFINDEX, ROUTE_TABLE, ROUTE_METRIC, contents, now);
+	leases = nm_dhcp_dhclient_read_lease_ip_configs (multi_idx, AF_INET, "wlan0", IFINDEX, contents, now);
 	g_assert (leases == NULL);
 
 	g_date_time_unref (now);
@@ -1017,7 +1015,7 @@ test_read_lease_ip4_config_expect_failure (gconstpointer user_data)
 
 	/* Date from before the least expiration */
 	now = g_date_time_new_utc (2013, 11, 1, 1, 1, 1);
-	leases = nm_dhcp_dhclient_read_lease_ip_configs (multi_idx, AF_INET, "wlan0", IFINDEX, ROUTE_TABLE, ROUTE_METRIC, contents, now);
+	leases = nm_dhcp_dhclient_read_lease_ip_configs (multi_idx, AF_INET, "wlan0", IFINDEX, contents, now);
 	g_assert (leases == NULL);
 
 	g_date_time_unref (now);

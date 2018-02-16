@@ -47,8 +47,6 @@ GSList *nm_dhcp_dhclient_read_lease_ip_configs (struct _NMDedupMultiIndex *multi
                                                 int addr_family,
                                                 const char *iface,
                                                 int ifindex,
-                                                guint32 route_table,
-                                                guint32 route_metric,
                                                 const char *contents,
                                                 GDateTime *now);
 

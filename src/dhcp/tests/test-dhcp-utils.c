@@ -35,13 +35,12 @@
 static NMIP4Config *
 _ip4_config_from_options (int ifindex,
                           const char *iface,
-                          GHashTable *options,
-                          guint32 route_metric)
+                          GHashTable *options)
 {
 	nm_auto_unref_dedup_multi_index NMDedupMultiIndex *multi_idx = nm_dedup_multi_index_new ();
 	NMIP4Config *config;
 
-	config = nm_dhcp_utils_ip4_config_from_options (multi_idx, ifindex, iface, options, RT_TABLE_MAIN, route_metric);
+	config = nm_dhcp_utils_ip4_config_from_options (multi_idx, ifindex, iface, options);
 	g_assert (config);
 	return config;
 }
@@ -102,7 +101,7 @@ test_generic_options (void)
 	const char *expected_route2_gw = "10.1.1.1";
 
 	options = fill_table (generic_options, NULL);
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 
 	/* IP4 address */
 	g_assert_cmpint (nm_ip4_config_get_num_addresses (ip4_config), ==, 1);
@@ -176,7 +175,7 @@ test_wins_options (void)
 
 	options = fill_table (generic_options, NULL);
 	options = fill_table (data, options);
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 
 	/* IP4 address */
 	g_assert_cmpint (nm_ip4_config_get_num_addresses (ip4_config), ==, 1);
@@ -202,14 +201,14 @@ test_vendor_option_metered (void)
 	};
 
 	options = fill_table (generic_options, NULL);
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 	g_assert (nm_ip4_config_get_metered (ip4_config) == FALSE);
 	g_hash_table_destroy (options);
 	g_clear_object (&ip4_config);
 
 	options = fill_table (generic_options, NULL);
 	options = fill_table (data, options);
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 	g_assert (nm_ip4_config_get_metered (ip4_config) == TRUE);
 	g_hash_table_destroy (options);
 }
@@ -262,7 +261,7 @@ test_classless_static_routes_1 (void)
 
 	options = fill_table (generic_options, NULL);
 	options = fill_table (data, options);
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 
 	/* IP4 routes */
 	g_assert_cmpint (nm_ip4_config_get_num_routes (ip4_config), ==, 3);
@@ -290,7 +289,7 @@ test_classless_static_routes_2 (void)
 
 	options = fill_table (generic_options, NULL);
 	options = fill_table (data, options);
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 
 	/* IP4 routes */
 	g_assert_cmpint (nm_ip4_config_get_num_routes (ip4_config), ==, 3);
@@ -319,7 +318,7 @@ test_fedora_dhclient_classless_static_routes (void)
 
 	options = fill_table (generic_options, NULL);
 	options = fill_table (data, options);
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 
 	/* IP4 routes */
 	g_assert_cmpint (nm_ip4_config_get_num_routes (ip4_config), ==, 3);
@@ -350,7 +349,7 @@ test_dhclient_invalid_classless_routes_1 (void)
 	options = fill_table (data, options);
 
 	NMTST_EXPECT_NM_WARN ("*ignoring invalid classless static routes*");
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 	g_test_assert_expected_messages ();
 
 	/* IP4 routes */
@@ -380,7 +379,7 @@ test_dhcpcd_invalid_classless_routes_1 (void)
 	options = fill_table (data, options);
 
 	NMTST_EXPECT_NM_WARN ("*ignoring invalid classless static routes*");
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 	g_test_assert_expected_messages ();
 
 	/* Test falling back to old-style static routes if the classless static
@@ -412,7 +411,7 @@ test_dhclient_invalid_classless_routes_2 (void)
 	options = fill_table (data, options);
 
 	NMTST_EXPECT_NM_WARN ("*ignoring invalid classless static routes*");
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 	g_test_assert_expected_messages ();
 
 	/* Test falling back to old-style static routes if the classless static
@@ -444,7 +443,7 @@ test_dhcpcd_invalid_classless_routes_2 (void)
 	options = fill_table (data, options);
 
 	NMTST_EXPECT_NM_WARN ("*ignoring invalid classless static routes*");
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 	g_test_assert_expected_messages ();
 
 	/* Test falling back to old-style static routes if the classless static
@@ -476,7 +475,7 @@ test_dhclient_invalid_classless_routes_3 (void)
 	options = fill_table (data, options);
 
 	NMTST_EXPECT_NM_WARN ("*ignoring invalid classless static routes*");
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 	g_test_assert_expected_messages ();
 
 	/* IP4 routes */
@@ -503,7 +502,7 @@ test_dhcpcd_invalid_classless_routes_3 (void)
 	options = fill_table (data, options);
 
 	NMTST_EXPECT_NM_WARN ("*DHCP provided invalid classless static route*");
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 	g_test_assert_expected_messages ();
 
 	/* IP4 routes */
@@ -529,7 +528,7 @@ test_dhclient_gw_in_classless_routes (void)
 
 	options = fill_table (generic_options, NULL);
 	options = fill_table (data, options);
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 
 	/* IP4 routes */
 	g_assert_cmpint (nm_ip4_config_get_num_routes (ip4_config), ==, 2);
@@ -557,7 +556,7 @@ test_dhcpcd_gw_in_classless_routes (void)
 
 	options = fill_table (generic_options, NULL);
 	options = fill_table (data, options);
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 
 	/* IP4 routes */
 	g_assert_cmpint (nm_ip4_config_get_num_routes (ip4_config), ==, 2);
@@ -585,7 +584,7 @@ test_escaped_domain_searches (void)
 
 	options = fill_table (generic_options, NULL);
 	options = fill_table (data, options);
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 
 	/* domain searches */
 	g_assert_cmpint (nm_ip4_config_get_num_searches (ip4_config), ==, 3);
@@ -610,7 +609,7 @@ test_invalid_escaped_domain_searches (void)
 	options = fill_table (data, options);
 
 	NMTST_EXPECT_NM_WARN ("*invalid domain search*");
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 	g_test_assert_expected_messages ();
 
 	/* domain searches */
@@ -630,7 +629,7 @@ test_ip4_missing_prefix (const char *ip, guint32 expected_prefix)
 	g_hash_table_insert (options, "ip_address", (gpointer) ip);
 	g_hash_table_remove (options, "subnet_mask");
 
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 
 	g_assert_cmpint (nm_ip4_config_get_num_addresses (ip4_config), ==, 1);
 	address = _nmtst_ip4_config_get_address (ip4_config, 0);
@@ -674,7 +673,7 @@ test_ip4_prefix_classless (void)
 	g_hash_table_insert (options, "ip_address", "172.16.54.22");
 	g_hash_table_insert (options, "subnet_mask", "255.255.252.0");
 
-	ip4_config = _ip4_config_from_options (1, "eth0", options, 0);
+	ip4_config = _ip4_config_from_options (1, "eth0", options);
 
 	g_assert_cmpint (nm_ip4_config_get_num_addresses (ip4_config), ==, 1);
 	address = _nmtst_ip4_config_get_address (ip4_config, 0);

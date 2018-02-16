@@ -40,8 +40,6 @@
 #define NM_DHCP_CLIENT_IFINDEX      "ifindex"
 #define NM_DHCP_CLIENT_INTERFACE    "iface"
 #define NM_DHCP_CLIENT_MULTI_IDX    "multi-idx"
-#define NM_DHCP_CLIENT_ROUTE_METRIC "route-metric"
-#define NM_DHCP_CLIENT_ROUTE_TABLE  "route-table"
 #define NM_DHCP_CLIENT_TIMEOUT      "timeout"
 #define NM_DHCP_CLIENT_UUID         "uuid"
 
@@ -198,9 +196,7 @@ typedef struct {
 	                                 int addr_family,
 	                                 const char *iface,
 	                                 int ifindex,
-	                                 const char *uuid,
-	                                 guint32 route_table,
-	                                 guint32 route_metric);
+	                                 const char *uuid);
 } NMDhcpClientFactory;
 
 extern const NMDhcpClientFactory _nm_dhcp_client_factory_dhcpcanon;

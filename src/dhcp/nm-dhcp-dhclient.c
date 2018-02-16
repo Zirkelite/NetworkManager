@@ -163,9 +163,7 @@ nm_dhcp_dhclient_get_lease_ip_configs (NMDedupMultiIndex *multi_idx,
                                        int addr_family,
                                        const char *iface,
                                        int ifindex,
-                                       const char *uuid,
-                                       guint32 route_table,
-                                       guint32 route_metric)
+                                       const char *uuid)
 {
 	gs_free char *contents = NULL;
 	gs_free char *leasefile = NULL;
@@ -178,8 +176,8 @@ nm_dhcp_dhclient_get_lease_ip_configs (NMDedupMultiIndex *multi_idx,
 	    && g_file_get_contents (leasefile, &contents, NULL, NULL)
 	    && contents
 	    && contents[0]) {
-		return nm_dhcp_dhclient_read_lease_ip_configs (multi_idx, addr_family, iface, ifindex,
-		                                               route_table, route_metric, contents, NULL);
+		return nm_dhcp_dhclient_read_lease_ip_configs (multi_idx, addr_family,
+		                                               iface, ifindex, contents, NULL);
 	}
 	return NULL;
 }

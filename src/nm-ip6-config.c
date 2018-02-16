@@ -820,6 +820,8 @@ void
 nm_ip6_config_merge (NMIP6Config *dst,
                      const NMIP6Config *src,
                      NMIPConfigMergeFlags merge_flags,
+                     guint32 fallback_route_table,
+                     guint32 fallback_route_metric,
                      guint32 default_route_metric_penalty)
 {
 	guint32 i;
@@ -846,18 +848,21 @@ nm_ip6_config_merge (NMIP6Config *dst,
 		const NMPlatformIP6Route *r_src;
 
 		nm_ip_config_iter_ip6_route_for_each (&ipconf_iter, src, &r_src) {
-			if (NM_PLATFORM_IP_ROUTE_IS_DEFAULT (r_src)) {
+			NMPlatformIP6Route r = *r_src;
+
+			if (r.metric_unset)
+				r.metric = fallback_route_metric;
+			if (r.table_unset)
+				r.table_coerced = nm_platform_route_table_coerce (fallback_route_table);
+
+			if (NM_PLATFORM_IP_ROUTE_IS_DEFAULT (&r)) {
 				if (NM_FLAGS_HAS (merge_flags, NM_IP_CONFIG_MERGE_NO_DEFAULT_ROUTES))
 					continue;
 				if (default_route_metric_penalty) {
-					NMPlatformIP6Route r = *r_src;
-
 					r.metric = nm_utils_ip_route_metric_penalize (AF_INET6, r.metric, default_route_metric_penalty);
-					_add_route (dst, NULL, &r, NULL);
-					continue;
 				}
 			}
-			_add_route (dst, ipconf_iter.current->obj, NULL, NULL);
+			_add_route (dst, NULL, &r, NULL);
 		}
 	}
 

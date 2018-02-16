@@ -127,6 +127,8 @@ NMSetting *nm_ip6_config_create_setting (const NMIP6Config *self);
 void nm_ip6_config_merge (NMIP6Config *dst,
                           const NMIP6Config *src,
                           NMIPConfigMergeFlags merge_flags,
+                          guint32 fallback_route_table,
+                          guint32 fallback_route_metric,
                           guint32 default_route_metric_penalty);
 void nm_ip6_config_subtract (NMIP6Config *dst,
                              const NMIP6Config *src,

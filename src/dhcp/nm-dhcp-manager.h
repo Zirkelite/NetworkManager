@@ -51,8 +51,6 @@ NMDhcpClient * nm_dhcp_manager_start_ip4     (NMDhcpManager *manager,
                                               int ifindex,
                                               GBytes *hwaddr,
                                               const char *uuid,
-                                              guint32 route_table,
-                                              guint32 route_metric,
                                               gboolean send_hostname,
                                               const char *dhcp_hostname,
                                               const char *dhcp_fqdn,
@@ -68,8 +66,6 @@ NMDhcpClient * nm_dhcp_manager_start_ip6     (NMDhcpManager *manager,
                                               GBytes *hwaddr,
                                               const struct in6_addr *ll_addr,
                                               const char *uuid,
-                                              guint32 route_table,
-                                              guint32 route_metric,
                                               gboolean send_hostname,
                                               const char *dhcp_hostname,
                                               guint32 timeout,
@@ -83,9 +79,7 @@ GSList *       nm_dhcp_manager_get_lease_ip_configs (NMDhcpManager *self,
                                                      int addr_family,
                                                      const char *iface,
                                                      int ifindex,
-                                                     const char *uuid,
-                                                     guint32 route_table,
-                                                     guint32 route_metric);
+                                                     const char *uuid);
 
 /* For testing only */
 extern const char* nm_dhcp_helper_path;

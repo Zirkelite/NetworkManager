@@ -183,6 +183,8 @@ NMSetting *nm_ip4_config_create_setting (const NMIP4Config *self);
 void nm_ip4_config_merge (NMIP4Config *dst,
                           const NMIP4Config *src,
                           NMIPConfigMergeFlags merge_flags,
+                          guint32 fallback_route_table,
+                          guint32 fallback_route_metric,
                           guint32 default_route_metric_penalty);
 void nm_ip4_config_subtract (NMIP4Config *dst,
                              const NMIP4Config *src,
@@ -517,12 +519,16 @@ static inline void
 nm_ip_config_merge (NMIPConfig *dst,
                     const NMIPConfig *src,
                     NMIPConfigMergeFlags merge_flags,
+                    guint32 fallback_route_table,
+                    guint32 fallback_route_metric,
                     guint32 default_route_metric_penalty)
 {
 	_NM_IP_CONFIG_DISPATCH_SET_OP (dst, src,
 	                               nm_ip4_config_merge,
 	                               nm_ip6_config_merge,
 	                               merge_flags,
+	                               fallback_route_table,
+	                               fallback_route_metric,
 	                               default_route_metric_penalty);
 }
 

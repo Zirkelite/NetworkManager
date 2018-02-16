@@ -6102,9 +6102,13 @@ ip4_config_merge_and_apply (NMDevice *self,
 	gboolean ignore_default_routes = FALSE;
 	GSList *iter;
 	gs_unref_ptrarray GPtrArray *ip4_dev_route_blacklist = NULL;
+	guint32 route_table, route_metric;
 
 	if (nm_device_sys_iface_state_is_external (self))
 		commit = 0;
+
+	route_table = nm_device_get_route_table (self, AF_INET, TRUE);
+	route_metric = nm_device_get_route_metric (self, AF_INET);
 
 	/* Apply ignore-auto-routes and ignore-auto-dns settings */
 	connection = nm_device_get_applied_connection (self);
@@ -6140,14 +6144,22 @@ ip4_config_merge_and_apply (NMDevice *self,
 		                       (ignore_auto_routes ? NM_IP_CONFIG_MERGE_NO_ROUTES : 0)
 		                     | (ignore_default_routes ? NM_IP_CONFIG_MERGE_NO_DEFAULT_ROUTES : 0)
 		                     | (ignore_auto_dns ? NM_IP_CONFIG_MERGE_NO_DNS : 0),
+		                     route_table,
+		                     route_metric,
 		                     default_route_metric_penalty_get (self, AF_INET));
 	}
 
 	for (iter = priv->vpn4_configs; iter; iter = iter->next)
-		nm_ip4_config_merge (composite, iter->data, NM_IP_CONFIG_MERGE_DEFAULT, 0);
+		nm_ip4_config_merge (composite, iter->data, NM_IP_CONFIG_MERGE_DEFAULT,
+		                     route_table,
+		                     route_metric,
+		                     0);
 
 	if (priv->ext_ip4_config)
-		nm_ip4_config_merge (composite, priv->ext_ip4_config, NM_IP_CONFIG_MERGE_DEFAULT, 0);
+		nm_ip4_config_merge (composite, priv->ext_ip4_config, NM_IP_CONFIG_MERGE_DEFAULT,
+		                     route_table,
+		                     route_metric,
+		                     0);
 
 	/* Merge WWAN config *last* to ensure modem-given settings overwrite
 	 * any external stuff set by pppd or other scripts.
@@ -6158,6 +6170,8 @@ ip4_config_merge_and_apply (NMDevice *self,
 		                       (ignore_auto_routes ? NM_IP_CONFIG_MERGE_NO_ROUTES : 0)
 		                     | (ignore_default_routes ? NM_IP_CONFIG_MERGE_NO_DEFAULT_ROUTES : 0)
 		                     | (ignore_auto_dns ? NM_IP_CONFIG_MERGE_NO_DNS : 0),
+		                     route_table,
+		                     route_metric,
 		                     default_route_metric_penalty_get (self, AF_INET));
 	}
 
@@ -6165,13 +6179,15 @@ ip4_config_merge_and_apply (NMDevice *self,
 	 * con_ip4_config is empty. */
 	if (priv->con_ip4_config) {
 		nm_ip4_config_merge (composite, priv->con_ip4_config, NM_IP_CONFIG_MERGE_DEFAULT,
+		                     route_table,
+		                     route_metric,
 		                     default_route_metric_penalty_get (self, AF_INET));
 	}
 
 	if (commit) {
 		nm_ip4_config_add_dependent_routes (composite,
-		                                    nm_device_get_route_table (self, AF_INET, TRUE),
-		                                    nm_device_get_route_metric (self, AF_INET),
+		                                    route_table,
+		                                    route_metric,
 		                                    &ip4_dev_route_blacklist);
 	}
 
@@ -6511,8 +6527,6 @@ dhcp4_start (NMDevice *self)
 	                                                nm_device_get_ip_ifindex (self),
 	                                                hwaddr,
 	                                                nm_connection_get_uuid (connection),
-	                                                nm_device_get_route_table (self, AF_INET, TRUE),
-	                                                nm_device_get_route_metric (self, AF_INET),
 	                                                nm_setting_ip_config_get_dhcp_send_hostname (s_ip4),
 	                                                nm_setting_ip_config_get_dhcp_hostname (s_ip4),
 	                                                nm_setting_ip4_config_get_dhcp_fqdn (NM_SETTING_IP4_CONFIG (s_ip4)),
@@ -6851,10 +6865,14 @@ ip6_config_merge_and_apply (NMDevice *self,
 	gboolean ignore_auto_dns = FALSE;
 	gboolean ignore_default_routes = FALSE;
 	const char *token = NULL;
+	guint32 route_table, route_metric;
 	GSList *iter;
 
 	if (nm_device_sys_iface_state_is_external (self))
 		commit = 0;
+
+	route_table = nm_device_get_route_table (self, AF_INET6, TRUE);
+	route_metric = nm_device_get_route_metric (self, AF_INET6);
 
 	/* Apply ignore-auto-routes and ignore-auto-dns settings */
 	connection = nm_device_get_applied_connection (self);
@@ -6900,6 +6918,8 @@ ip6_config_merge_and_apply (NMDevice *self,
 		                       (ignore_auto_routes ? NM_IP_CONFIG_MERGE_NO_ROUTES : 0)
 		                     | (ignore_default_routes ? NM_IP_CONFIG_MERGE_NO_DEFAULT_ROUTES : 0)
 		                     | (ignore_auto_dns ? NM_IP_CONFIG_MERGE_NO_DNS : 0),
+		                     route_table,
+		                     route_metric,
 		                     default_route_metric_penalty_get (self, AF_INET6));
 	}
 
@@ -6909,14 +6929,22 @@ ip6_config_merge_and_apply (NMDevice *self,
 		                       (ignore_auto_routes ? NM_IP_CONFIG_MERGE_NO_ROUTES : 0)
 		                     | (ignore_default_routes ? NM_IP_CONFIG_MERGE_NO_DEFAULT_ROUTES : 0)
 		                     | (ignore_auto_dns ? NM_IP_CONFIG_MERGE_NO_DNS : 0),
+		                     route_table,
+		                     route_metric,
 		                     default_route_metric_penalty_get (self, AF_INET6));
 	}
 
 	for (iter = priv->vpn6_configs; iter; iter = iter->next)
-		nm_ip6_config_merge (composite, iter->data, NM_IP_CONFIG_MERGE_DEFAULT, 0);
+		nm_ip6_config_merge (composite, iter->data, NM_IP_CONFIG_MERGE_DEFAULT,
+		                     route_table,
+		                     route_metric,
+		                     0);
 
 	if (priv->ext_ip6_config)
-		nm_ip6_config_merge (composite, priv->ext_ip6_config, NM_IP_CONFIG_MERGE_DEFAULT, 0);
+		nm_ip6_config_merge (composite, priv->ext_ip6_config, NM_IP_CONFIG_MERGE_DEFAULT,
+		                     route_table,
+		                     route_metric,
+		                     0);
 
 	/* Merge WWAN config *last* to ensure modem-given settings overwrite
 	 * any external stuff set by pppd or other scripts.
@@ -6927,6 +6955,8 @@ ip6_config_merge_and_apply (NMDevice *self,
 		                       (ignore_auto_routes ? NM_IP_CONFIG_MERGE_NO_ROUTES : 0)
 		                     | (ignore_default_routes ? NM_IP_CONFIG_MERGE_NO_DEFAULT_ROUTES : 0)
 		                     | (ignore_auto_dns ? NM_IP_CONFIG_MERGE_NO_DNS : 0),
+		                     route_table,
+		                     route_metric,
 		                     default_route_metric_penalty_get (self, AF_INET6));
 	}
 
@@ -6946,14 +6976,13 @@ ip6_config_merge_and_apply (NMDevice *self,
 	 * con_ip6_config is empty. */
 	if (priv->con_ip6_config) {
 		nm_ip6_config_merge (composite, priv->con_ip6_config, NM_IP_CONFIG_MERGE_DEFAULT,
+		                     route_table,
+		                     route_metric,
 		                     default_route_metric_penalty_get (self, AF_INET6));
 	}
 
-	if (commit) {
-		nm_ip6_config_add_dependent_routes (composite,
-		                                    nm_device_get_route_table (self, AF_INET6, TRUE),
-		                                    nm_device_get_route_metric (self, AF_INET6));
-	}
+	if (commit)
+		nm_ip6_config_add_dependent_routes (composite, route_table, route_metric);
 
 	/* Allow setting MTU etc */
 	if (commit) {
@@ -7234,8 +7263,6 @@ dhcp6_start_with_link_ready (NMDevice *self, NMConnection *connection)
 	                                                hwaddr,
 	                                                &ll_addr->address,
 	                                                nm_connection_get_uuid (connection),
-	                                                nm_device_get_route_table (self, AF_INET6, TRUE),
-	                                                nm_device_get_route_metric (self, AF_INET6),
 	                                                nm_setting_ip_config_get_dhcp_send_hostname (s_ip6),
 	                                                nm_setting_ip_config_get_dhcp_hostname (s_ip6),
 	                                                get_dhcp_timeout (self, AF_INET6),
@@ -11269,9 +11296,7 @@ find_ip4_lease_config (NMDevice *self,
 	                                               AF_INET,
 	                                               ip_iface,
 	                                               ip_ifindex,
-	                                               nm_connection_get_uuid (connection),
-	                                               nm_device_get_route_table (self, AF_INET, TRUE),
-	                                               nm_device_get_route_metric (self, AF_INET));
+	                                               nm_connection_get_uuid (connection));
 	for (liter = leases; liter && !found; liter = liter->next) {
 		NMIP4Config *lease_config = liter->data;
 		const NMPlatformIP4Address *address = nm_ip4_config_get_first_address (lease_config);
